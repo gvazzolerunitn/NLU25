@@ -3,6 +3,15 @@
 
 # Import everything from functions.py file
 
+""" **Mandatory requirements**: For the following experiments the perplexity must be below 250 (***PPL < 250***) and it should be lower than the one achieved in Part 1.1 (i.e. base LSTM).
+
+Starting from the `LM_RNN` in which you replaced the RNN with a LSTM model, apply the following regularisation techniques:
+- Weight Tying 
+- Variational Dropout (no DropConnect)
+- Non-monotonically Triggered AvSGD 
+
+These techniques are described in [this paper](https://openreview.net/pdf?id=SyyGPP0TZ). """
+
 import os
 import math
 import copy
@@ -125,14 +134,14 @@ if __name__ == "__main__":
     print('Test ppl: ', final_ppl)
 
     # saving models
-    path = 'model_bin/model_AdamW_dropout_lr_0.001_emb_400_hid_512_batch_32.pt'
-    path_best = 'model_bin/model_AdamW_dropout_lr_0.001_emb_400_hid_512_batch_32_best.pt'
+    path = 'model_bin/model_LSTM_WT.pt'
+    path_best = 'model_bin/model_LSTM_WT_best.pt'
     os.makedirs(os.path.dirname(path), exist_ok=True)
     torch.save(model.state_dict(), path)
     torch.save(best_model.state_dict(), path_best)
 
     # run and parameters config
-    run_name = "LSTM_ALSTM_AdamW_dropout_lr_0.001_emb_400_hid_512_batch_32"
+    run_name = "LSTM_WT"
     config = {
         "model": model.__class__.__name__,
         "optimizer": optimizer.__class__.__name__,

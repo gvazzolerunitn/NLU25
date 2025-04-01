@@ -68,7 +68,7 @@ def init_weights(mat):
 
 # Experiment also with a smaller or bigger model by changing hid and emb sizes 
 # A large model tends to overfit
-hid_size = 200
+hid_size = 300 # OLD: 200
 emb_size = 300
 
 # Don't forget to experiment with a lower training batch size
