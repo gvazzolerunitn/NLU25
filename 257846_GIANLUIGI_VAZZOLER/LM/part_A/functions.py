@@ -29,21 +29,29 @@ class LM_LSTM(nn.Module):
         # Token ids to vectors, we will better see this in the next lab 
         self.embedding = nn.Embedding(output_size, emb_size, padding_idx=pad_index)
 
-        self.emb_dropout = nn.Dropout(emb_dropout) # DROPOUT LAYER
+        # ADDING DROPOUT AFTER THE EMBEDDING LAYER
+        self.emb_dropout = nn.Dropout(emb_dropout)
 
         # Pytorch's RNN layer: https://pytorch.org/docs/stable/generated/torch.nn.RNN.html
         self.lstm = nn.LSTM(emb_size, hidden_size, n_layers, bidirectional=False, batch_first=True)    
         self.pad_token = pad_index
 
-        self.out_dropout = nn.Dropout(out_dropout) # SECOND DROPOUT LAYER
+        # ADDING DROPOUT BEFORE THE OUTPUT LAYER
+        self.out_dropout = nn.Dropout(out_dropout)
 
         # Linear layer to project the hidden layer to our output space 
         self.output = nn.Linear(hidden_size, output_size)
         
     def forward(self, input_sequence):
         emb = self.embedding(input_sequence)
-        emb = self.emb_dropout(emb) # DROPOUT
+
+        # DROPOUT AFTER THE EMBEDDING LAYER
+        emb = self.emb_dropout(emb) 
+
         lstm_out, _ = self.lstm(emb)
-        lstm_out = self.out_dropout(lstm_out) # SECOND DROPOUT
+
+        # DROPOUT BEFORE THE OUTPUT LAYER
+        lstm_out = self.out_dropout(lstm_out)
+
         output = self.output(lstm_out).permute(0,2,1)
         return output
