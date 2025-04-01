@@ -15,7 +15,7 @@ from utils import *
 from model import *
 import csv
 
-def plot_training_curves(sampled_epochs, losses_train, losses_dev, best_ppl, run_name):
+def plot_training_curves(sampled_epochs, losses_train, losses_dev, ppl_devs, best_ppl, run_name):
     plt.figure(figsize=(12, 5))
 
     # Training and validation loss
@@ -32,9 +32,8 @@ def plot_training_curves(sampled_epochs, losses_train, losses_dev, best_ppl, run
 
     # Validation perplexity
     plt.subplot(1, 2, 2)
-    perplexity_dev = [np.exp(loss) for loss in losses_dev]
-    plt.plot(sampled_epochs, perplexity_dev, label='Validation Perplexity', color='orange')
-    plt.scatter(sampled_epochs, perplexity_dev, s=10, color='orange')
+    plt.plot(sampled_epochs, ppl_devs, label='Validation Perplexity', color='orange')
+    plt.scatter(sampled_epochs, ppl_devs, s=10, color='orange')
     plt.axhline(y=best_ppl, color='r', linestyle='--', label=f'Best Perplexity: {best_ppl:.2f}')
     plt.xlabel('Epochs')
     plt.ylabel('Perplexity')
@@ -51,34 +50,38 @@ def plot_training_curves(sampled_epochs, losses_train, losses_dev, best_ppl, run
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.show()
 
-def save_training_log(sampled_epochs, losses_train, losses_dev, run_name, best_ppl, config):
+def save_training_log(sampled_epochs, losses_train, losses_dev, run_name, best_ppl, config, ppl_devs, final_ppl):
     run_dir = os.path.join('runs', run_name)
     os.makedirs(run_dir, exist_ok=True)
     csv_path = os.path.join(run_dir, 'training_log.csv')
 
-    perplexities = [np.exp(loss) for loss in losses_dev]
-
     with open(csv_path, mode='w', newline='') as file:
         writer = csv.writer(file, delimiter='\t')
 
-        # table config
+        # Config section
         writer.writerow(['# Training Configuration'])
         writer.writerow(['Parameter', 'Value'])
         for key, value in config.items():
             writer.writerow([key, value])
         writer.writerow([])
 
-        # table organization
+        # per epoch results section
+        writer.writerow(['# Training Results Per Epoch'])
         writer.writerow(['Epoch', 'Training Loss', 'Validation Loss', 'Validation Perplexity'])
-
-        # data for each epoch
-        for epoch, loss_tr, loss_dev, ppl in zip(sampled_epochs, losses_train, losses_dev, perplexities):
+        for epoch, loss_tr, loss_dev, ppl in zip(sampled_epochs, losses_train, losses_dev, ppl_devs):
             writer.writerow([
                 epoch,
                 f"{loss_tr:.6f}",
                 f"{loss_dev:.6f}",
                 f"{ppl:.3f}"
             ])
+        
+        # final results section
+        writer.writerow([])
+        writer.writerow(['# Final Evaluation Metrics'])
+        writer.writerow(['Final Epoch Validation Perplexity', f"{ppl_devs[-1]:.3f}"])
+        writer.writerow(['Best Validation Perplexity', f"{best_ppl:.3f}"])
+        writer.writerow(['Test Perplexity', f"{final_ppl:.3f}"])
 
 if __name__ == "__main__":
     if torch.cuda.is_available():
@@ -92,6 +95,7 @@ if __name__ == "__main__":
     patience = 3
     losses_train = []
     losses_dev = []
+    ppl_devs = []
     sampled_epochs = []
     best_ppl = math.inf
     best_model = None
@@ -103,7 +107,9 @@ if __name__ == "__main__":
             sampled_epochs.append(epoch)
             losses_train.append(np.asarray(loss).mean())
             ppl_dev, loss_dev = eval_loop(dev_loader, criterion_eval, model)
-            losses_dev.append(np.asarray(loss_dev).mean())
+            loss_dev_mean = np.asarray(loss_dev).mean()
+            losses_dev.append(loss_dev_mean)
+            ppl_devs.append(ppl_dev)
             pbar.set_description("PPL: %f" % ppl_dev)
             if ppl_dev < best_ppl:
                 best_ppl = ppl_dev
@@ -142,5 +148,5 @@ if __name__ == "__main__":
     }
 
     # plotting and csv saving
-    plot_training_curves(sampled_epochs, losses_train, losses_dev, best_ppl, run_name)
-    save_training_log(sampled_epochs, losses_train, losses_dev, run_name, best_ppl, config)
+    plot_training_curves(sampled_epochs, losses_train, losses_dev, ppl_devs, best_ppl, run_name)
+    save_training_log(sampled_epochs, losses_train, losses_dev, run_name, best_ppl, config, ppl_devs, final_ppl)
