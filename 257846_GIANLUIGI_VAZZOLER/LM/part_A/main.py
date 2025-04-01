@@ -125,14 +125,14 @@ if __name__ == "__main__":
     print('Test ppl: ', final_ppl)
 
     # saving models
-    path = 'model_bin/model_AdamW_dropout_lr_0.001.pt'
-    path_best = 'model_bin/model_AdamW_dropout_lr_0.001_best.pt'
+    path = 'model_bin/model_AdamW_dropout_lr_0.001_emb_400_hid_512_batch_32.pt'
+    path_best = 'model_bin/model_AdamW_dropout_lr_0.001_emb_400_hid_512_batch_32_best.pt'
     os.makedirs(os.path.dirname(path), exist_ok=True)
     torch.save(model.state_dict(), path)
     torch.save(best_model.state_dict(), path_best)
 
     # run and parameters config
-    run_name = "LSTM_AdamW_dropout_lr_0.001"
+    run_name = "LSTM_ALSTM_AdamW_dropout_lr_0.001_emb_400_hid_512_batch_32"
     config = {
         "model": model.__class__.__name__,
         "optimizer": optimizer.__class__.__name__,

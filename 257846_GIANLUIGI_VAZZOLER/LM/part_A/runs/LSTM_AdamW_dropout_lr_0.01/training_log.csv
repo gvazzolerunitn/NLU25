@@ -1,0 +1,28 @@
+# Training Configuration
+Parameter	Value
+model	LM_LSTM
+optimizer	AdamW
+learning_rate	0.01
+embedding_size	300
+hidden_size	200
+clip	5
+dropout_embedding	Dropout(p=0.1, inplace=False)
+dropout_output	Dropout(p=0.1, inplace=False)
+patience	3
+epochs_ran	7
+best_ppl	161.87546145712545
+
+# Training Results Per Epoch
+Epoch	Training Loss	Validation Loss	Validation Perplexity
+1	5.583744	5.219901	184.916
+2	4.976394	5.107245	165.215
+3	4.751135	5.088954	162.220
+4	4.604534	5.086827	161.875
+5	4.497837	5.100357	164.081
+6	4.418405	5.121856	167.646
+7	4.349820	5.136717	170.156
+
+# Final Evaluation Metrics
+Final Epoch Validation Perplexity	170.156
+Best Validation Perplexity	161.875
+Test Perplexity	148.706
