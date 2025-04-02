@@ -23,6 +23,7 @@ from functions import *
 from utils import *
 from model import *
 import csv
+from model import averaged_model, start_averaging # for AvSGD
 
 def plot_training_curves(sampled_epochs, losses_train, losses_dev, ppl_devs, best_ppl, run_name):
     plt.figure(figsize=(12, 5))
@@ -112,6 +113,8 @@ if __name__ == "__main__":
 
     for epoch in pbar:
         loss = train_loop(train_loader, optimizer, criterion_train, model, clip)
+        if epoch >= start_averaging:
+            averaged_model.update_parameters(model)
         if epoch % 1 == 0:
             sampled_epochs.append(epoch)
             losses_train.append(np.asarray(loss).mean())
@@ -129,19 +132,22 @@ if __name__ == "__main__":
             if patience <= 0:
                 break
 
-    best_model.to(device)
-    final_ppl, _ = eval_loop(test_loader, criterion_eval, best_model)
+    # OLD CODE
+    """ best_model.to(device)
+    final_ppl, _ = eval_loop(test_loader, criterion_eval, best_model) """
+    averaged_model.to(device)
+    final_ppl, _ = eval_loop(test_loader, criterion_eval, averaged_model)
     print('Test ppl: ', final_ppl)
 
     # saving models
-    path = 'model_bin/model_LSTM_WT.pt'
-    path_best = 'model_bin/model_LSTM_WT_best.pt'
+    path = 'model_bin/model_LSTM_WT_VD_AvSGD.pt'
+    path_best = 'model_bin/model_LSTM_WT_VD_AvSGD_best.pt'
     os.makedirs(os.path.dirname(path), exist_ok=True)
     torch.save(model.state_dict(), path)
     torch.save(best_model.state_dict(), path_best)
 
     # run and parameters config
-    run_name = "LSTM_WT"
+    run_name = "LSTM_WT_VD_AvSGD"
     config = {
         "model": model.__class__.__name__,
         "optimizer": optimizer.__class__.__name__,
