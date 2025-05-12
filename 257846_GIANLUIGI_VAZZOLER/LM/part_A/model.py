@@ -68,14 +68,17 @@ def init_weights(mat):
 
 # Experiment also with a smaller or bigger model by changing hid and emb sizes 
 # A large model tends to overfit
-hid_size = 512
-emb_size = 400
+# PART A
+hid_size = 200
+emb_size = 300
 
 # Don't forget to experiment with a lower training batch size
 # Increasing the back propagation steps can be seen as a regularization step
 
 # With SGD try with an higher learning rate (> 1 for instance)
-lr = 0.001 # This is definitely not good for SGD [try 1 for SGD and 0.001 for AdamW]
+lr = 1 # This is definitely not good for SGD [try 1 for SGD and 0.001 for AdamW]
+# Learning rate for AdamW
+# lr = 0.0001
 clip = 5 # Clip the gradient
 
 vocab_len = len(lang.word2id)
@@ -83,13 +86,14 @@ vocab_len = len(lang.word2id)
 # OLD CODE
 """ model = LM_RNN(emb_size, hid_size, vocab_len, pad_index=lang.word2id["<pad>"]).to(DEVICE) """
 
+# LSTM 
 model = LM_LSTM(emb_size, hid_size, vocab_len, pad_index=lang.word2id["<pad>"]).to(DEVICE)
 model.apply(init_weights)
 
 # OLD CODE => SGD
-#optimizer = optim.SGD(model.parameters(), lr=lr)
+optimizer = optim.SGD(model.parameters(), lr=lr)
 # STEP 3 => AdamW
-optimizer = optim.AdamW(model.parameters(), lr=lr)
+#optimizer = optim.AdamW(model.parameters(), lr=lr)
 
 criterion_train = nn.CrossEntropyLoss(ignore_index=lang.word2id["<pad>"])
 criterion_eval = nn.CrossEntropyLoss(ignore_index=lang.word2id["<pad>"], reduction='sum')

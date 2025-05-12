@@ -1,0 +1,11 @@
+**/model_bin/
+**/dataset/
+**/__pycache__/
+
+# File temporanei o di backup
+*.pyc
+*.pyo
+*.zip
+
+# File nascosti
+.DS_Store

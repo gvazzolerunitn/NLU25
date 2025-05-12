@@ -1,0 +1,25 @@
+# Training Configuration
+Parameter	Value
+name	LSTM_AdamW_dropout_False_lr_0.001_emb_400_hid_300_batch_64
+dropout	False
+optimizer	AdamW
+lr	0.001
+hid_size	300
+emb_size	400
+batch_size	64
+
+Epoch	Train Loss	Dev Loss	Dev Perplexity
+1	5.9363	5.4547	233.86
+2	5.1934	5.1788	177.47
+3	4.8876	5.0513	156.22
+4	4.6785	4.9890	146.79
+5	4.5150	4.9530	141.60
+6	4.3791	4.9338	138.91
+7	4.2605	4.9396	139.71
+8	4.1554	4.9464	140.66
+9	4.0602	4.9649	143.30
+
+# Final Evaluation Metrics
+Final Epoch Validation Perplexity	143.299
+Best Validation Perplexity	138.911
+Test Perplexity	128.711

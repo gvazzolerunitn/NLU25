@@ -36,7 +36,7 @@ class LM_LSTM(nn.Module):
         self.lstm = nn.LSTM(emb_size, hidden_size, n_layers, bidirectional=False, batch_first=True)    
         self.pad_token = pad_index
 
-        # ADDING DROPOUT BEFORE THE OUTPUT LAYER
+        # ADDING DROPOUT BEFORE THE LAST LAYER
         self.out_dropout = nn.Dropout(out_dropout)
 
         # Linear layer to project the hidden layer to our output space 
@@ -50,7 +50,7 @@ class LM_LSTM(nn.Module):
 
         lstm_out, _ = self.lstm(emb)
 
-        # DROPOUT BEFORE THE OUTPUT LAYER
+        # DROPOUT BEFORE THE LAST LAYER
         lstm_out = self.out_dropout(lstm_out)
 
         output = self.output(lstm_out).permute(0,2,1)

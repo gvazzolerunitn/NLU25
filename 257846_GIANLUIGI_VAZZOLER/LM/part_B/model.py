@@ -5,7 +5,6 @@ import torch.optim as optim
 import math
 import matplotlib.pyplot as plt
 import copy
-from torch.optim.swa_utils import AveragedModel, SWALR # to implement AvSGD
 
 from tqdm import tqdm
 
@@ -69,7 +68,7 @@ def init_weights(mat):
 
 # Experiment also with a smaller or bigger model by changing hid and emb sizes 
 # A large model tends to overfit
-hid_size = 300 # OLD: 200
+hid_size = 300 # OLD: 200 (they must be the same value for weight tying)
 emb_size = 300
 
 # Don't forget to experiment with a lower training batch size
@@ -86,9 +85,6 @@ model.apply(init_weights)
 
 # OLD CODE => SGD
 optimizer = optim.SGD(model.parameters(), lr=lr)
-# adding code for AvSGD
-averaged_model = AveragedModel(model)
-start_averaging = 20
 
 criterion_train = nn.CrossEntropyLoss(ignore_index=lang.word2id["<pad>"])
 criterion_eval = nn.CrossEntropyLoss(ignore_index=lang.word2id["<pad>"], reduction='sum')

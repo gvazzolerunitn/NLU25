@@ -2,5 +2,3 @@
 # Please write your fuctions or classes in the functions.py
 
 # Import everything from functions.py file
-
-    
