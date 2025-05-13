@@ -6,12 +6,16 @@
 from functions import *
 
 experiments_config = {
-    "LSTM_dropout_unidir": {
-        "dropout": 0.3,
+    "LSTM_nodropout_unidir": {
         "bidirectional": False,
         "run": True,
         "n_runs": 1
-    }
+    },
+    "LSTM_nodropout_bidir": {
+        "bidirectional": True,
+        "run": True,
+        "n_runs": 1
+    }   
 }
 
 if __name__ == "__main__":
