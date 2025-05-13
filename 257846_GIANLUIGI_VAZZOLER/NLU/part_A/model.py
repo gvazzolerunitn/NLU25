@@ -42,7 +42,7 @@ class ModelIAS(nn.Module):
         self.slot_out = nn.Linear(encoding_size, out_slot)  # Slot filling head
         self.intent_out = nn.Linear(encoding_size, out_int)  # Intent classification head
 
-        # Dropout layer used during training
+        # Dropout layer used during training (shared)
         self.dropout = nn.Dropout(dropout)
 
 
@@ -57,6 +57,8 @@ class ModelIAS(nn.Module):
 
         # utterance.size() = batch_size X seq_len
         utt_emb = self.embedding(utterance)  # utt_emb.size() = batch_size X seq_len X emb_size
+        # adding dropout
+        utt_emb = self.dropout(utt_emb)
 
         # pack_padded_sequence avoid computation over pad tokens reducing the computational cost
         packed_input = pack_padded_sequence(utt_emb, seq_lengths.cpu().numpy(),
@@ -66,7 +68,8 @@ class ModelIAS(nn.Module):
         packed_output, (last_hidden, cell) = self.utt_encoder(packed_input)
 
         # Unpack the sequence
-        utt_encoded, input_sizes = pad_packed_sequence(packed_output, batch_first=True)
+        utt_encoded, _ = pad_packed_sequence(packed_output, batch_first=True)
+        utt_encoded = self.dropout(utt_encoded)  # Dropout on LSTM output
 
         # Get the last hidden state
         if self.bidirectional:
@@ -75,6 +78,8 @@ class ModelIAS(nn.Module):
             last_hidden = torch.cat((last_hidden[-2,:,:], last_hidden[-1,:,:]), dim=1)  # Combine forward + backward
         else:
             last_hidden = last_hidden[-1,:,:]  # Original behavior
+
+        last_hidden = self.dropout(last_hidden)  # Dropout before intent prediction
 
         # Is this another possible way to get the last hiddent state? (Why?)
         # utt_encoded.permute(1,0,2)[-1]
@@ -85,7 +90,7 @@ class ModelIAS(nn.Module):
         intent = self.intent_out(last_hidden)  # [batch_size, out_int]
 
         # Slot size: batch_size, seq_len, classes
-        slots = slots.permute(0,2,1)  # We need this for computing the loss
+        slots = slots.permute(0,2,1)  # We need this for computing the loss (cross entropy)
         # Slot size: batch_size, classes, seq_len
 
         return slots, intent

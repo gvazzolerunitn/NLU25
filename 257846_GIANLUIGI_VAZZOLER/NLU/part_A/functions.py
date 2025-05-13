@@ -224,6 +224,8 @@ def save_run_results(runpath, cfg, sampled_epochs, losses_train, losses_val, int
     plt.title('Loss over Epochs')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
+    plt.xlim(0, 200)  # Fixed x-axis from 0 to 200
+    plt.ylim(0, 3.5)  # Fixed y-axis from 0 to 3.5 for losses
     plt.legend()
     
     plt.subplot(1, 2, 2)
@@ -232,11 +234,21 @@ def save_run_results(runpath, cfg, sampled_epochs, losses_train, losses_val, int
     plt.title('Metrics over Epochs')
     plt.xlabel('Epoch')
     plt.ylabel('Score')
+    plt.xlim(0, 200)  # Fixed x-axis from 0 to 200
+    plt.ylim(0, 1.0)  # Fixed y-axis from 0 to 1.0 for accuracy/F1
     plt.legend()
     
     plt.tight_layout()
     plt.savefig(os.path.join(runpath, 'training_curves.png'))
     plt.close()
+
+# Specific function to save results from multiple runs
+def save_aggregated_summary(runpath, experiment_name, slot_f1s, intent_accs):
+    filepath = os.path.join(runpath, 'summary.txt')
+    with open(filepath, 'w') as f:
+        f.write(f"Experiment: {experiment_name}\n")
+        f.write(f"Mean Slot F1: {np.mean(slot_f1s):.4f} ± {np.std(slot_f1s):.4f}\n")
+        f.write(f"Mean Intent Accuracy: {np.mean(intent_accs):.4f} ± {np.std(intent_accs):.4f}\n")
 
 
 # CORRECTED: Modified run_training_pipeline to handle the modified train function return value
@@ -267,7 +279,7 @@ def run_training_pipeline(experiments_config):
         if cfg['run']:
             lang = Lang(words, intents, slots, cutoff=0)
         else:
-            saved_model = torch.load('./bin/' + experiment + '.pt', map_location=torch.device(device))
+            saved_model = torch.load('./model_bin/' + experiment + '.pt', map_location=torch.device(device))
             lang = saved_model['lang']
         
         out_slot = len(lang.slot2id)
@@ -284,11 +296,12 @@ def run_training_pipeline(experiments_config):
         
         runpath = os.path.join(save_path, 'runs', experiment)
         os.makedirs(runpath, exist_ok=True)
-        os.makedirs('./bin', exist_ok=True)
-        file_path = './bin/' + experiment + '.pt'
+        os.makedirs('./model_bin', exist_ok=True)
+        file_path = './model_bin/' + experiment + '.pt'
         
         slot_f1s, intent_acc = [], []
         results_test, intent_test = [], []
+        best_f1_overall = -1  # tracks best overall F1 for best model
         
         if not cfg['run']:
             cfg['n_runs'] = 5
@@ -304,7 +317,26 @@ def run_training_pipeline(experiments_config):
                     file_path, lang, model, PAD_TOKEN, train_loader, val_loader, test_loader, cfg['lr'], cfg['clip']
                 )
                 
-                save_run_results(runpath, cfg, sampled_epochs, losses_train, losses_val, intent_accs, slot_f1s, results_test, intent_test)
+                # Create a subdirectory for each run
+                run_dir = os.path.join(runpath, f"run_{run_idx + 1}")
+                os.makedirs(run_dir, exist_ok=True)
+                save_run_results(run_dir, cfg, sampled_epochs, losses_train, losses_val, intent_accs, slot_f1s, results_test, intent_test)
+
+                # Save model of this run with unique name
+                run_model_path = f'./model_bin/{experiment}_run{run_idx + 1}.pt'
+                torch.save({
+                    "model": model.state_dict(),
+                    "lang": lang,
+                }, run_model_path)
+
+                # Save best model among all runs
+                if results_test['total']['f'] > best_f1_overall:
+                    best_f1_overall = results_test['total']['f']
+                    best_model_path = f'./model_bin/{experiment}_best.pt'
+                    torch.save({
+                        "model": model.state_dict(),
+                        "lang": lang,
+                    }, best_model_path)
 
             else:
                 model.load_state_dict(saved_model['model'])
@@ -320,6 +352,7 @@ def run_training_pipeline(experiments_config):
             intent_acc = np.asarray(intent_acc)
             print(f'Slot F1: {slot_f1s.mean():.3f} +- {slot_f1s.std():.3f}')
             print(f'Intent Acc: {intent_acc.mean():.3f} +- {intent_acc.std():.3f}')
+            save_aggregated_summary(runpath, experiment, slot_f1s, intent_acc)
         else:
             print(f"Slot F1: {results_test['total']['f']:.3f}")
             print(f"Intent Accuracy: {intent_test['accuracy']:.3f}")

@@ -5,17 +5,74 @@
 
 from functions import *
 
-experiments_config = {
-    "LSTM_nodropout_unidir": {
+# First experiment: 1 run per configuration
+
+""" experiments_config = {
+    "LSTM_dropout0.0_unidir": {
+        "dropout": 0.0,
         "bidirectional": False,
         "run": True,
         "n_runs": 1
     },
-    "LSTM_nodropout_bidir": {
+    "LSTM_dropout0.0_bidir": {
+        "dropout": 0.0,
         "bidirectional": True,
         "run": True,
         "n_runs": 1
-    }   
+    },
+    "LSTM_dropout0.1_unidir": {
+        "dropout": 0.1,
+        "bidirectional": False,
+        "run": True,
+        "n_runs": 1
+    },
+    "LSTM_dropout0.1_bidir": {
+        "dropout": 0.1,
+        "bidirectional": True,
+        "run": True,
+        "n_runs": 1
+    },
+    "LSTM_dropout0.3_unidir": {
+        "dropout": 0.3,
+        "bidirectional": False,
+        "run": True,
+        "n_runs": 1
+    },
+    "LSTM_dropout0.3_bidir": {
+        "dropout": 0.3,
+        "bidirectional": True,
+        "run": True,
+        "n_runs": 1
+    },
+    "LSTM_dropout0.5_unidir": {
+        "dropout": 0.5,
+        "bidirectional": False,
+        "run": True,
+        "n_runs": 1
+    },
+    "LSTM_dropout0.5_bidir": {
+        "dropout": 0.5,
+        "bidirectional": True,
+        "run": True,
+        "n_runs": 1
+    }
+} """
+
+# Second experiment: 3 runs (with mean) for the two best-performing configurations
+
+experiments_config = {
+    "LSTM_dropout0.1_bidir": {
+        "dropout": 0.1,
+        "bidirectional": True,
+        "run": True,
+        "n_runs": 3
+    },
+    "LSTM_dropout0.3_bidir": {
+        "dropout": 0.3,
+        "bidirectional": True,
+        "run": True,
+        "n_runs": 3
+    }
 }
 
 if __name__ == "__main__":
