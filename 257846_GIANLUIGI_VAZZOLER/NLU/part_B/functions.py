@@ -13,8 +13,15 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from tqdm.auto import tqdm, trange
 
-from model import *
-from utils import *
+from model import JointBertForNLU
+from utils import (
+    load_data,
+    divide_training_set,
+    get_tokenizer,
+    NLUDataset,
+    PAD_TOKEN,
+    DEVICE
+)
 
 # ─────────── 0) Training loop with tqdm ───────────
 def train_loop(model, loader, optimizer, scheduler,
@@ -27,9 +34,11 @@ def train_loop(model, loader, optimizer, scheduler,
         attention_mask = batch['attention_mask'].to(device)
 
         intent_logits, slot_logits = model(input_ids, attention_mask)
-        loss_intent = crit_intent(intent_logits,
-                                 batch['labels_intent'].to(device))
-        loss_slot   = crit_slot(
+        loss_intent = crit_intent(
+            intent_logits,
+            batch['labels_intent'].to(device)
+        )
+        loss_slot = crit_slot(
             slot_logits.view(-1, slot_logits.size(-1)),
             batch['labels_slots'].view(-1).to(device)
         )
@@ -55,10 +64,11 @@ def eval_loop(model, loader, crit_slot, crit_intent,
             attention_mask = batch['attention_mask'].to(device)
 
             intent_logits, slot_logits = model(input_ids, attention_mask)
-            # losses
-            loss_intent = crit_intent(intent_logits,
-                                     batch['labels_intent'].to(device))
-            loss_slot   = crit_slot(
+            loss_intent = crit_intent(
+                intent_logits,
+                batch['labels_intent'].to(device)
+            )
+            loss_slot = crit_slot(
                 slot_logits.view(-1, slot_logits.size(-1)),
                 batch['labels_slots'].view(-1).to(device)
             )
@@ -86,8 +96,10 @@ def eval_loop(model, loader, crit_slot, crit_intent,
                 refs.append(r)
                 hyps.append(h)
 
-    slot_res = evaluate([[('', w) for w in seq] for seq in refs],
-                        [[('', w) for w in seq] for seq in hyps])
+    slot_res = evaluate(
+        [[('', w) for w in seq] for seq in refs],
+        [[('', w) for w in seq] for seq in hyps]
+    )
     intent_rep = classification_report(
         [id2intent[i] for i in all_int_labels],
         [id2intent[i] for i in all_int_preds],
@@ -110,22 +122,39 @@ def save_run_results(runpath, cfg, epochs, train_losses, val_losses,
         'intent_accuracy': intent_accs,
         'slot_f1':         slot_f1s
     })
-    with open(os.path.join(runpath, 'training_log.csv'), 'w') as f:
+    csv_path = os.path.join(runpath, 'training_log.csv')
+    with open(csv_path, 'w') as f:
         for k, v in cfg.items():
             if k != 'run':
                 f.write(f"# {k}={v}\n")
         df.to_csv(f, index=False)
 
-    # 2) Plot curves
+    # 2) Plot curves (smoothed, fixed axes)
+    epochs_arr    = np.array(epochs)
+    train_smooth  = pd.Series(train_losses).rolling(window=3, center=True, min_periods=1).mean()
+    val_smooth    = pd.Series(val_losses).rolling(window=3, center=True, min_periods=1).mean()
+    intent_smooth = pd.Series(intent_accs).rolling(window=3, center=True, min_periods=1).mean()
+    slot_smooth   = pd.Series(slot_f1s).rolling(window=3, center=True, min_periods=1).mean()
+
     plt.figure(figsize=(12, 5))
+    # Loss plot
     plt.subplot(1, 2, 1)
-    plt.plot(epochs, train_losses, label='Train Loss')
-    plt.plot(epochs, val_losses,   label='Val Loss')
+    plt.plot(epochs_arr, train_smooth,  marker='o', label='Train Loss')
+    plt.plot(epochs_arr, val_smooth,    marker='o', label='Val Loss')
     plt.xlabel('Epoch'); plt.ylabel('Loss'); plt.legend()
+    plt.xlim(1, cfg.get('epochs', epochs_arr.max()))
+    plt.ylim(0, 1.6)
+    plt.xticks(epochs_arr)
+
+    # Metrics plot
     plt.subplot(1, 2, 2)
-    plt.plot(epochs, intent_accs, label='Intent Acc')
-    plt.plot(epochs, slot_f1s,     label='Slot F1')
+    plt.plot(epochs_arr, intent_smooth, marker='o', label='Intent Acc')
+    plt.plot(epochs_arr, slot_smooth,   marker='o', label='Slot F1')
     plt.xlabel('Epoch'); plt.ylabel('Score'); plt.legend()
+    plt.xlim(1, cfg.get('epochs', epochs_arr.max()))
+    plt.ylim(0, 1.0)
+    plt.xticks(epochs_arr)
+
     plt.tight_layout()
     plt.savefig(os.path.join(runpath, 'training_curves.png'))
     plt.close()
@@ -134,15 +163,14 @@ def save_run_results(runpath, cfg, epochs, train_losses, val_losses,
 def train_and_save(runpath, model, train_loader, val_loader, test_loader,
                    slot2id, intent2id, cfg):
     device = DEVICE
-    model = model.to(device)
+    model  = model.to(device)
 
-    optimizer   = torch.optim.Adam(model.parameters(),
-                                   lr=cfg['lr'], eps=1e-8)
+    optimizer   = torch.optim.Adam(model.parameters(), lr=cfg['lr'], eps=1e-8)
     crit_intent = nn.CrossEntropyLoss()
     crit_slot   = nn.CrossEntropyLoss(ignore_index=PAD_TOKEN)
 
     best_f1, best_model = 0.0, None
-    patience = cfg['patience']
+    patience            = cfg['patience']
 
     epochs       = cfg['epochs']
     epoch_list   = []
@@ -192,10 +220,6 @@ def train_and_save(runpath, model, train_loader, val_loader, test_loader,
                      epoch_list, train_losses, val_losses,
                      intent_accs, slot_f1s)
 
-    # Save best model
-    os.makedirs(os.path.dirname(cfg['model_path']), exist_ok=True)
-    torch.save({'model': best_model.state_dict()}, cfg['model_path'])
-
     # Final test evaluation
     model.load_state_dict(best_model.state_dict())
     slot_test, intent_test, _ = eval_loop(
@@ -205,6 +229,18 @@ def train_and_save(runpath, model, train_loader, val_loader, test_loader,
         {v:k for k,v in intent2id.items()},
         PAD_TOKEN, device
     )
+
+    # Append final test metrics to CSV
+    csv_path = os.path.join(runpath, 'training_log.csv')
+    with open(csv_path, 'a') as f:
+        f.write("\n# Final Test Metrics\n")
+        f.write(f"test_intent_accuracy,{intent_test['accuracy']:.4f}\n")
+        f.write(f"test_slot_f1,{slot_test['total']['f']:.4f}\n")
+
+    # Save best model
+    os.makedirs(os.path.dirname(cfg['model_path']), exist_ok=True)
+    torch.save({'model': best_model.state_dict()}, cfg['model_path'])
+
     return slot_test, intent_test
 
 # ─────────── 4) run_experiments ───────────
@@ -229,17 +265,16 @@ def run_experiments(to_run):
 
     for exp, cfg in to_run.items():
         timestamp  = datetime.now().strftime("%Y%m%d_%H%M%S")
-        runpath    = os.path.join("runs", exp, timestamp)
+        runpath    = os.path.join("runs",    exp, timestamp)
         model_path = os.path.join("model_bin", exp + ".pt")
         cfg.update({
-            'runpath':   runpath,
+            'runpath':    runpath,
             'model_path': model_path,
             'model_name': 'bert-base-uncased'
         })
         os.makedirs(runpath, exist_ok=True)
 
         print(f"\n===== Running {exp} =====")
-        # DataLoaders (allow varying batch size)
         train_loader = DataLoader(train_ds,
                                   batch_size=cfg['batch_size'],
                                   shuffle=True)
@@ -250,10 +285,12 @@ def run_experiments(to_run):
 
         slot_test, intent_test = train_and_save(
             runpath,
-            JointBertForNLU(cfg['model_name'],
-                            len(intents),
-                            len(slots),
-                            cfg['dropout']),
+            JointBertForNLU(
+                cfg['model_name'],
+                len(intents),
+                len(slots),
+                cfg['dropout']
+            ),
             train_loader, val_loader, test_loader,
             slot2id, intent2id,
             cfg
