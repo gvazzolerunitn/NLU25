@@ -1,2 +1,262 @@
-# Add the class of your model only
-# Here is where you define the architecture of your model using pytorch
+# Add the remaining functions for the model
+
+import os, copy
+import numpy as np
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+from datetime import datetime
+from sklearn.metrics import classification_report
+from conll import evaluate
+
+import matplotlib.pyplot as plt
+import pandas as pd
+from tqdm.auto import tqdm, trange
+
+from model import *
+from utils import *
+
+# ─────────── 0) Training loop with tqdm ───────────
+def train_loop(model, loader, optimizer, scheduler,
+               crit_slot, crit_intent, device, clip=5):
+    model.train()
+    total_loss = 0.0
+    for batch in tqdm(loader, desc="Training batches", leave=False):
+        optimizer.zero_grad()
+        input_ids      = batch['input_ids'].to(device)
+        attention_mask = batch['attention_mask'].to(device)
+
+        intent_logits, slot_logits = model(input_ids, attention_mask)
+        loss_intent = crit_intent(intent_logits,
+                                 batch['labels_intent'].to(device))
+        loss_slot   = crit_slot(
+            slot_logits.view(-1, slot_logits.size(-1)),
+            batch['labels_slots'].view(-1).to(device)
+        )
+        (loss_intent + loss_slot).backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
+        optimizer.step()
+        if scheduler is not None:
+            scheduler.step()
+        total_loss += (loss_intent + loss_slot).item()
+    return total_loss / len(loader)
+
+# ─────────── 1) Eval loop returning val_loss ───────────
+def eval_loop(model, loader, crit_slot, crit_intent,
+              id2slot, id2intent, pad_id, device):
+    model.eval()
+    val_losses = []
+    all_int_preds, all_int_labels = [], []
+    refs, hyps = [], []
+
+    with torch.no_grad():
+        for batch in tqdm(loader, desc="Validation batches", leave=False):
+            input_ids      = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+
+            intent_logits, slot_logits = model(input_ids, attention_mask)
+            # losses
+            loss_intent = crit_intent(intent_logits,
+                                     batch['labels_intent'].to(device))
+            loss_slot   = crit_slot(
+                slot_logits.view(-1, slot_logits.size(-1)),
+                batch['labels_slots'].view(-1).to(device)
+            )
+            val_losses.append((loss_intent + loss_slot).item())
+
+            # intent preds & labels
+            preds_i = intent_logits.argmax(dim=1).cpu().tolist()
+            labs_i  = batch['labels_intent'].tolist()
+            all_int_preds.extend(preds_i)
+            all_int_labels.extend(labs_i)
+
+            # slot preds & labels
+            slot_preds = slot_logits.argmax(dim=2).cpu().tolist()
+            slot_trues = batch['labels_slots'].cpu().tolist()
+            masks      = attention_mask.cpu().tolist()
+            for p_seq, t_seq, m_seq in zip(slot_preds, slot_trues, masks):
+                r, h = [], []
+                for p, t, m in zip(p_seq, t_seq, m_seq):
+                    if m == 0:
+                        break
+                    if t == pad_id:
+                        continue
+                    r.append(id2slot[t])
+                    h.append(id2slot[p])
+                refs.append(r)
+                hyps.append(h)
+
+    slot_res = evaluate([[('', w) for w in seq] for seq in refs],
+                        [[('', w) for w in seq] for seq in hyps])
+    intent_rep = classification_report(
+        [id2intent[i] for i in all_int_labels],
+        [id2intent[i] for i in all_int_preds],
+        output_dict=True, zero_division=False
+    )
+
+    mean_val_loss = float(np.mean(val_losses))
+    return slot_res, intent_rep, mean_val_loss
+
+# ─────────── 2) Helper to save CSV + plot ───────────
+def save_run_results(runpath, cfg, epochs, train_losses, val_losses,
+                     intent_accs, slot_f1s):
+    os.makedirs(runpath, exist_ok=True)
+
+    # 1) CSV log
+    df = pd.DataFrame({
+        'epoch':           epochs,
+        'train_loss':      train_losses,
+        'val_loss':        val_losses,
+        'intent_accuracy': intent_accs,
+        'slot_f1':         slot_f1s
+    })
+    with open(os.path.join(runpath, 'training_log.csv'), 'w') as f:
+        for k, v in cfg.items():
+            if k != 'run':
+                f.write(f"# {k}={v}\n")
+        df.to_csv(f, index=False)
+
+    # 2) Plot curves
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, train_losses, label='Train Loss')
+    plt.plot(epochs, val_losses,   label='Val Loss')
+    plt.xlabel('Epoch'); plt.ylabel('Loss'); plt.legend()
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs, intent_accs, label='Intent Acc')
+    plt.plot(epochs, slot_f1s,     label='Slot F1')
+    plt.xlabel('Epoch'); plt.ylabel('Score'); plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(runpath, 'training_curves.png'))
+    plt.close()
+
+# ─────────── 3) Training + saving pipeline ───────────
+def train_and_save(runpath, model, train_loader, val_loader, test_loader,
+                   slot2id, intent2id, cfg):
+    device = DEVICE
+    model = model.to(device)
+
+    optimizer   = torch.optim.Adam(model.parameters(),
+                                   lr=cfg['lr'], eps=1e-8)
+    crit_intent = nn.CrossEntropyLoss()
+    crit_slot   = nn.CrossEntropyLoss(ignore_index=PAD_TOKEN)
+
+    best_f1, best_model = 0.0, None
+    patience = cfg['patience']
+
+    epochs       = cfg['epochs']
+    epoch_list   = []
+    train_losses = []
+    val_losses   = []
+    intent_accs  = []
+    slot_f1s     = []
+
+    # Epoch loop with tqdm
+    for ep in trange(1, epochs+1, desc="Epochs", leave=True):
+        # Training step
+        tloss = train_loop(
+            model, train_loader, optimizer, None,
+            crit_slot, crit_intent, device,
+            cfg.get('clip', 5)
+        )
+
+        # Validation step
+        slot_val, intent_val, vloss = eval_loop(
+            model, val_loader,
+            crit_slot, crit_intent,
+            {v:k for k,v in slot2id.items()},
+            {v:k for k,v in intent2id.items()},
+            PAD_TOKEN, device
+        )
+
+        # Record metrics
+        epoch_list.append(ep)
+        train_losses.append(tloss)
+        val_losses.append(vloss)
+        intent_accs.append(intent_val['accuracy'])
+        slot_f1s.append(slot_val['total']['f'])
+
+        # Early stopping
+        f1 = slot_val['total']['f']
+        if f1 > best_f1:
+            best_f1    = f1
+            best_model = copy.deepcopy(model).cpu()
+            patience   = cfg['patience']
+        else:
+            patience -= 1
+        if patience <= 0:
+            break
+
+    # Save CSV + plots
+    save_run_results(runpath, cfg,
+                     epoch_list, train_losses, val_losses,
+                     intent_accs, slot_f1s)
+
+    # Save best model
+    os.makedirs(os.path.dirname(cfg['model_path']), exist_ok=True)
+    torch.save({'model': best_model.state_dict()}, cfg['model_path'])
+
+    # Final test evaluation
+    model.load_state_dict(best_model.state_dict())
+    slot_test, intent_test, _ = eval_loop(
+        model, test_loader,
+        crit_slot, crit_intent,
+        {v:k for k,v in slot2id.items()},
+        {v:k for k,v in intent2id.items()},
+        PAD_TOKEN, device
+    )
+    return slot_test, intent_test
+
+# ─────────── 4) run_experiments ───────────
+def run_experiments(to_run):
+    tmp_train = load_data(os.path.join('dataset', 'ATIS', 'train.json'))
+    test_raw  = load_data(os.path.join('dataset', 'ATIS', 'test.json'))
+    train_raw, val_raw, _, _, _ = divide_training_set(tmp_train, test_raw)
+
+    # Build label maps
+    corpus    = train_raw + val_raw + test_raw
+    slots     = sorted({s for x in corpus for s in x['slots'].split()})
+    intents   = sorted({x['intent'] for x in corpus})
+    slot2id   = {l:i for i,l in enumerate(slots)}
+    intent2id = {l:i for i,l in enumerate(intents)}
+
+    tokenizer = get_tokenizer()
+
+    # Prepare datasets once
+    train_ds = NLUDataset(train_raw, tokenizer, slot2id, intent2id)
+    val_ds   = NLUDataset(val_raw,   tokenizer, slot2id, intent2id)
+    test_ds  = NLUDataset(test_raw,  tokenizer, slot2id, intent2id)
+
+    for exp, cfg in to_run.items():
+        timestamp  = datetime.now().strftime("%Y%m%d_%H%M%S")
+        runpath    = os.path.join("runs", exp, timestamp)
+        model_path = os.path.join("model_bin", exp + ".pt")
+        cfg.update({
+            'runpath':   runpath,
+            'model_path': model_path,
+            'model_name': 'bert-base-uncased'
+        })
+        os.makedirs(runpath, exist_ok=True)
+
+        print(f"\n===== Running {exp} =====")
+        # DataLoaders (allow varying batch size)
+        train_loader = DataLoader(train_ds,
+                                  batch_size=cfg['batch_size'],
+                                  shuffle=True)
+        val_loader   = DataLoader(val_ds,
+                                  batch_size=cfg['batch_size'])
+        test_loader  = DataLoader(test_ds,
+                                  batch_size=cfg['batch_size'])
+
+        slot_test, intent_test = train_and_save(
+            runpath,
+            JointBertForNLU(cfg['model_name'],
+                            len(intents),
+                            len(slots),
+                            cfg['dropout']),
+            train_loader, val_loader, test_loader,
+            slot2id, intent2id,
+            cfg
+        )
+        print(f"→ Test Slot F1: {slot_test['total']['f']:.4f}")
+        print(f"→ Test Intent Acc: {intent_test['accuracy']:.4f}")

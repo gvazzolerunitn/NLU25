@@ -1,5 +1,4 @@
 # Add the remaining functions for the model
-# Add the remaining functions for the model (from original notebook)
 
 import os
 import copy
