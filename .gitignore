@@ -6,6 +6,8 @@
 *.pyc
 *.pyo
 *.zip
+*.tar.gz
+
 
 # File nascosti
 .DS_Store
