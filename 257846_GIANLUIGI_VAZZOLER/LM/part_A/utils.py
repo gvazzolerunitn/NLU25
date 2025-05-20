@@ -1,5 +1,12 @@
 # Add functions or classes used for data loading and preprocessing
 
+import torch
+import torch.utils.data as data
+
+from functools import partial
+from torch.utils.data import DataLoader
+
+
 DEVICE = 'cuda:0'
 
 # Loading the corpus 
@@ -58,8 +65,6 @@ class Lang():
     
 lang = Lang(train_raw, ["<pad>", "<eos>"])
 
-import torch
-import torch.utils.data as data
 
 class PennTreeBank (data.Dataset):
     # Mandatory methods are __init__, __len__ and __getitem__
@@ -104,8 +109,6 @@ train_dataset = PennTreeBank(train_raw, lang)
 dev_dataset = PennTreeBank(dev_raw, lang)
 test_dataset = PennTreeBank(test_raw, lang)
 
-from functools import partial
-from torch.utils.data import DataLoader
 
 def collate_fn(data, pad_token):
     def merge(sequences):
@@ -144,3 +147,34 @@ def collate_fn(data, pad_token):
 train_loader = DataLoader(train_dataset, batch_size=32, collate_fn=partial(collate_fn, pad_token=lang.word2id["<pad>"]),  shuffle=True)
 dev_loader = DataLoader(dev_dataset, batch_size=128, collate_fn=partial(collate_fn, pad_token=lang.word2id["<pad>"]))
 test_loader = DataLoader(test_dataset, batch_size=128, collate_fn=partial(collate_fn, pad_token=lang.word2id["<pad>"]))
+
+def get_loaders(batch_size_train,
+                batch_size_eval=None,
+                pad_token=None,
+                device=DEVICE):
+    """
+    Returns (train_loader, dev_loader, test_loader) using the given batch sizes.
+    If batch_size_eval is None, it defaults to batch_size_train.
+    """
+    if pad_token is None:
+        pad_token = lang.word2id["<pad>"]
+    if batch_size_eval is None:
+        batch_size_eval = batch_size_train
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size_train,
+        shuffle=True,
+        collate_fn=partial(collate_fn, pad_token=pad_token)
+    )
+    dev_loader = DataLoader(
+        dev_dataset,
+        batch_size=batch_size_eval,
+        collate_fn=partial(collate_fn, pad_token=pad_token)
+    )
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size_eval,
+        collate_fn=partial(collate_fn, pad_token=pad_token)
+    )
+    return train_loader, dev_loader, test_loader
