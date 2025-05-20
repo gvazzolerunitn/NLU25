@@ -5,7 +5,6 @@ import torch.nn as nn
 import torch.optim as optim
 import math
 import matplotlib.pyplot as plt
-import copy
 import csv
 
 from tqdm import tqdm
