@@ -6,6 +6,7 @@ import math
 import copy
 import torch
 import numpy as np
+from tqdm import tqdm
 from functions import *
 import argparse
 import sys
@@ -194,17 +195,32 @@ def run_training():
         trigger_epoch = None
 
         for epoch in range(1, common_params['n_epochs'] + 1):
+            # — Wrap epochs in a tqdm progress bar —
+            pbar = tqdm(
+                range(1, common_params['n_epochs'] + 1),
+                desc=f"Exp {exp['name']}",
+                unit="ep"
+            )
+        for epoch in pbar:
+            # 1) train
             loss = train_loop(train_loader, optimizer, criterion_train, model, common_params['clip'])
-            loss_mean = np.asarray(loss).mean()
+            train_loss = float(np.asarray(loss).mean())
 
-            ppl_dev, loss_dev = eval_loop(dev_loader, criterion_eval, model)
+            # 2) dev eval
+            ppl_dev, dev_loss = eval_loop(dev_loader, criterion_eval, model)
+            dev_loss = float(dev_loss)
 
+            # 3) record for CSV
             sampled_epochs.append(epoch)
-            losses_train.append(loss_mean)
-            losses_dev.append(loss_dev)
+            losses_train.append(train_loss)
+            losses_dev.append(dev_loss)
             ppl_devs.append(ppl_dev)
 
-            print(f"[Epoch {epoch}] Train Loss: {loss_mean:.4f}, Dev Loss: {loss_dev:.4f}, Dev PPL: {ppl_dev:.2f}")
+            # 4) update tqdm description
+            pbar.set_postfix({
+                "TrainLoss": f"{train_loss:.3f}",
+                "DevPPL":    f"{ppl_dev:.2f}"
+            })
 
             # Registra il dev-PPL per il trigger non-monotono
             ppl_logs.append(ppl_dev)
