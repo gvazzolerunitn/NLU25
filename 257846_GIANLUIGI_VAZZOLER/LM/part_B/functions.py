@@ -67,7 +67,7 @@ def init_weights(mat):
                 if m.bias != None:
                     m.bias.data.fill_(0.01)
 
-# Experiment also with a smaller or bigger model by changing hid and emb sizes 
+""" # Experiment also with a smaller or bigger model by changing hid and emb sizes 
 # A large model tends to overfit
 hid_size = 300 # OLD: 200 (they must be the same value for weight tying)
 emb_size = 300
@@ -89,6 +89,12 @@ optimizer = optim.SGD(model.parameters(), lr=lr)
 
 criterion_train = nn.CrossEntropyLoss(ignore_index=lang.word2id["<pad>"])
 criterion_eval = nn.CrossEntropyLoss(ignore_index=lang.word2id["<pad>"], reduction='sum')
+
+# Dataloader instantiation
+# You can reduce the batch_size if the GPU memory is not enough
+train_loader = DataLoader(train_dataset, batch_size=32, collate_fn=partial(collate_fn, pad_token=lang.word2id["<pad>"]),  shuffle=True)
+dev_loader = DataLoader(dev_dataset, batch_size=128, collate_fn=partial(collate_fn, pad_token=lang.word2id["<pad>"]))
+test_loader = DataLoader(test_dataset, batch_size=128, collate_fn=partial(collate_fn, pad_token=lang.word2id["<pad>"])) """
 
 # Utility functions
 def plot_training_curves(sampled_epochs, losses_train, losses_dev, ppl_devs, best_ppl, run_dir):

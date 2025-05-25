@@ -139,11 +139,6 @@ def collate_fn(data, pad_token):
     new_item["number_tokens"] = sum(lengths)
     return new_item
 
-# Dataloader instantiation
-# You can reduce the batch_size if the GPU memory is not enough
-train_loader = DataLoader(train_dataset, batch_size=32, collate_fn=partial(collate_fn, pad_token=lang.word2id["<pad>"]),  shuffle=True)
-dev_loader = DataLoader(dev_dataset, batch_size=128, collate_fn=partial(collate_fn, pad_token=lang.word2id["<pad>"]))
-test_loader = DataLoader(test_dataset, batch_size=128, collate_fn=partial(collate_fn, pad_token=lang.word2id["<pad>"]))
 
 def get_loaders(batch_size_train,
                 batch_size_eval=None,

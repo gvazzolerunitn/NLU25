@@ -40,7 +40,7 @@ def get_config():
 # ───────────────────────────────────────────────────────────────────────
 # Experiment configurations
 # ───────────────────────────────────────────────────────────────────────
-EXPERIMENTS = [
+""" EXPERIMENTS = [
     # STEP 1: Weight Tying only
     {"name": "LSTM_WT_only", "use_vdropout": False, "use_ntasgd": False, "lr": 1.0, "emb_size": 300, "hid_size": 300, "batch_size": 32, "dropout_rate": 0.0},
 
@@ -62,6 +62,19 @@ EXPERIMENTS = [
     # Exploring smaller model
     {"name": "LSTM_WT_VD_NTAvSGD", "use_vdropout": True, "use_ntasgd": True, "lr": 1.0, "emb_size": 200, "hid_size": 200, "batch_size": 32, "dropout_rate": 0.1},
     {"name": "LSTM_WT_VD_NTAvSGD", "use_vdropout": True, "use_ntasgd": True, "lr": 1.5, "emb_size": 200, "hid_size": 200, "batch_size": 32, "dropout_rate": 0.1},
+] """
+
+EXPERIMENTS = [
+    {
+  "name":            "LSTM_AWD_like",
+  "use_vdropout":    True,
+  "use_ntasgd":      True,
+  "lr":              1.5,       # via di mezzo tra 1.0 e 2.0
+  "emb_size":        400,       # “medium” / “large” come nel paper
+  "hid_size":        400,
+  "batch_size":      40,        # più vicino al 32–45 consigliato
+  "dropout_rate":    0.3        # valore un po’ più basso per non soffocare l’output
+}
 ]
 
 
@@ -86,6 +99,7 @@ def make_run_name(exp):
     )
 
 def run_evaluation(config):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     """Handle evaluation mode"""
     provided_dir = config["model_dir"]
     if not provided_dir:
@@ -116,12 +130,12 @@ def run_evaluation(config):
         pad_index   = lang.word2id["<pad>"],
         emb_dropout = exp["dropout_rate"] if exp["use_vdropout"] else 0.0,
         out_dropout = exp["dropout_rate"] if exp["use_vdropout"] else 0.0
-    ).to(DEVICE)
+    ).to(device)
     model.apply(init_weights)
 
     # 2) load weights
     ckpt = os.path.join(provided_dir, "model.pt")
-    model.load_state_dict(torch.load(ckpt, map_location=DEVICE))
+    model.load_state_dict(torch.load(ckpt, map_location=device))
     print(f"✔ Loaded checkpoint: {ckpt}\n")
 
     # 3) fresh test_loader with correct batch‐size
@@ -129,7 +143,7 @@ def run_evaluation(config):
         batch_size_train = exp["batch_size"],
         batch_size_eval  = exp["batch_size"],
         pad_token        = lang.word2id["<pad>"],
-        device           = DEVICE
+        device           = device
     )
 
     # 4) eval
@@ -164,15 +178,18 @@ def run_training():
             batch_size_train = exp["batch_size"],
             batch_size_eval  = exp["batch_size"],
             pad_token        = lang.word2id["<pad>"],
-            device           = DEVICE
+            device           = device
         )
 
         losses_train, losses_dev, ppl_devs, sampled_epochs = [], [], [], []
-        best_ppl = math.inf
-        logs = []
-        patience = common_params['patience']
 
-        averaging = False
+        # — Inizializza best_model e buffer per NT-AvSGD
+        best_ppl      = math.inf
+        best_model    = copy.deepcopy(model)            # sempre disponibile
+        ppl_logs      = []                              # terrà i dev-PPL di ogni epoca
+        patience      = common_params['patience']
+
+        averaging     = False
         average_model = None
         trigger_epoch = None
 
@@ -189,7 +206,8 @@ def run_training():
 
             print(f"[Epoch {epoch}] Train Loss: {loss_mean:.4f}, Dev Loss: {loss_dev:.4f}, Dev PPL: {ppl_dev:.2f}")
 
-            logs.append(loss_dev)
+            # Registra il dev-PPL per il trigger non-monotono
+            ppl_logs.append(ppl_dev)
 
             if not exp['use_ntasgd']:
                 # Early stopping
@@ -202,26 +220,31 @@ def run_training():
                 if patience <= 0:
                     break
             else:
-                # NT-AvSGD logic
+                # — NT-AvSGD logic
                 if not averaging:
-                    if len(logs) > common_params['ntasgd_trigger'] and logs[-1] > min(logs[-common_params['ntasgd_trigger']:]):
-                        print(f"Starting Averaging from epoch {epoch}")
-                        averaging = True
+                    # trigger: il PPL corrente supera il min dei PPL delle epoche precedenti (escluse ultime ntasgd_trigger)
+                    if len(ppl_logs) > common_params['ntasgd_trigger'] and \
+                       ppl_dev > min(ppl_logs[:-common_params['ntasgd_trigger']]):
+                        print(f"Starting NT-AvSGD Averaging from epoch {epoch}")
+                        averaging     = True
                         trigger_epoch = epoch
                         average_model = copy.deepcopy(model)
                 else:
+                    # incremental averaging:
                     steps = epoch - trigger_epoch
                     for p_avg, p_model in zip(average_model.parameters(), model.parameters()):
                         p_avg.data.mul_(steps / (steps + 1))
                         p_avg.data.add_(p_model.data / (steps + 1))
 
+                # aggiorna sempre il best_model sulla base del dev-PPL
                 if ppl_dev < best_ppl:
-                    best_ppl = ppl_dev
+                    best_ppl   = ppl_dev
+                    best_model = copy.deepcopy(model)
 
         # Final evaluation
+        # — Scegli il modello finale (averaged vs best)
         if exp['use_ntasgd'] and averaging:
-            average_model.to(device)
-            final_model = average_model
+            final_model = average_model.to(device)
         else:
             final_model = best_model.to(device)
 
