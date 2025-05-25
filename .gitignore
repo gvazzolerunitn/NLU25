@@ -1,6 +1,8 @@
 **/model_bin/
 **/dataset/
+**/new_plots/
 **/__pycache__/
+plotting.py
 
 # File temporanei o di backup
 *.pyc
