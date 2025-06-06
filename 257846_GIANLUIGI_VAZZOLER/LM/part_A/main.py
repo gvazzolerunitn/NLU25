@@ -4,24 +4,22 @@
 # Import everything from functions.py file
 
 import os
+import sys
 import math
 import copy
 import torch
-import numpy as np
-import matplotlib.pyplot as plt
-from tqdm import tqdm
 from functions import *
-import sys
 
-# ─── your single‐run configuration ───
+
+# ─── single‐run configuration ───
 config = {
     # mode: "train" to train a fresh model, "eval" to load & test an existing one
     "mode":         "eval",
     # when mode="eval", point to the folder containing model_best.pt; otherwise, set it to 'None'
-    "model_dir":    "/home/gian/Documents/AIS/NLU/NLU-exam_assignments/257846_GIANLUIGI_VAZZOLER/LM/part_A/model_bin/TEST"
+    "model_dir":    "example/model/folder"# paste the model folder here
 ,
 
-    # the rest drive training when mode="train"
+    # when mode="train"
     "name":         "TEST",
     "optimizer":    "SGD",        # or "AdamW"
     "emb_size":     300,          # embedding size
@@ -33,7 +31,6 @@ config = {
     "n_epochs":     100,          # max epochs
     "patience":     3             # early‐stopping patience
 }
-
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

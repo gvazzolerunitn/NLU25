@@ -9,7 +9,7 @@ from sklearn.model_selection import train_test_split
 from collections import Counter
 
 
-device = 'cuda:0' # cuda:0 means we are using the GPU with id 0, if you have multiple GPU
+device = 'cuda:0' if torch.cuda.is_available() else 'cpu' # cuda:0 means we are using the GPU with id 0, if you have multiple GPU
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1" # Used to report errors on CUDA side
 PAD_TOKEN = 0
 
@@ -53,7 +53,6 @@ def create_dev_set(tmp_train_raw, test_raw):
     y_test = [x['intent'] for x in test_raw]
 
     return train_raw, dev_raw, y_train, y_dev, y_test
-
 
 class Lang():
     def __init__(self, words, intents, slots, cutoff=0):

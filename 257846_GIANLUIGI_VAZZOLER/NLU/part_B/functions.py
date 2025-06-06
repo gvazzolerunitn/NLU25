@@ -3,6 +3,7 @@
 import os, copy
 import numpy as np
 import torch
+import random
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from datetime import datetime
@@ -13,17 +14,23 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from tqdm.auto import tqdm, trange
 
-from model import JointBertForNLU
-from utils import (
-    load_data,
-    divide_training_set,
-    get_tokenizer,
-    NLUDataset,
-    PAD_TOKEN,
-    DEVICE
-)
+from model import *
+from utils import *
 
-# ─────────── 0) Training loop with tqdm ───────────
+# ─────────── 0) setting seed ───────────
+def set_global_seed(seed: int):
+    """
+    Sets the seed for Python, NumPy, and PyTorch (CPU/GPU),
+    and disables non-deterministic behaviors in cuDNN.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+# ─────────── 1) Training loop with tqdm ───────────
 def train_loop(model, loader, optimizer, scheduler,
                crit_slot, crit_intent, device, clip=5):
     model.train()
@@ -50,7 +57,7 @@ def train_loop(model, loader, optimizer, scheduler,
         total_loss += (loss_intent + loss_slot).item()
     return total_loss / len(loader)
 
-# ─────────── 1) Eval loop returning val_loss ───────────
+# ─────────── 2) Eval loop returning val_loss ───────────
 def eval_loop(model, loader, crit_slot, crit_intent,
               id2slot, id2intent, pad_id, device):
     model.eval()
@@ -109,12 +116,12 @@ def eval_loop(model, loader, crit_slot, crit_intent,
     mean_val_loss = float(np.mean(val_losses))
     return slot_res, intent_rep, mean_val_loss
 
-# ─────────── 2) Helper to save CSV + plot ───────────
+# ─────────── 3) Helper to save CSV + plot ───────────
 def save_run_results(runpath, cfg, epochs, train_losses, val_losses,
                      intent_accs, slot_f1s):
     os.makedirs(runpath, exist_ok=True)
 
-    # 1) CSV log
+    # a) CSV log
     df = pd.DataFrame({
         'epoch':           epochs,
         'train_loss':      train_losses,
@@ -129,7 +136,29 @@ def save_run_results(runpath, cfg, epochs, train_losses, val_losses,
                 f.write(f"# {k}={v}\n")
         df.to_csv(f, index=False)
 
-    # 2) Plot curves (smoothed, fixed axes)
+    # b) Summary.txt file
+    summary_path = os.path.join(runpath, 'summary.txt')
+    with open(summary_path, 'w') as f:
+        f.write("=== EXPERIMENT SUMMARY ===\n\n")
+        
+        # Configuration
+        f.write("Configuration:\n")
+        for k, v in cfg.items():
+            if k not in ['run', 'runpath', 'model_path']:
+                f.write(f"  {k}: {v}\n")
+        f.write("\n")
+        
+        # Training Summary
+        f.write("Training Summary:\n")
+        f.write(f"  Total Epochs: {len(epochs)}\n")
+        f.write(f"  Final Train Loss: {train_losses[-1]:.4f}\n")
+        f.write(f"  Final Val Loss: {val_losses[-1]:.4f}\n")
+        f.write(f"  Best Slot F1: {max(slot_f1s):.4f}\n")
+        f.write(f"  Best Intent Acc: {max(intent_accs):.4f}\n")
+        f.write(f"  Final Slot F1: {slot_f1s[-1]:.4f}\n")
+        f.write(f"  Final Intent Acc: {intent_accs[-1]:.4f}\n")
+
+    # c) Plot curves (smoothed, fixed axes)
     epochs_arr    = np.array(epochs)
     train_smooth  = pd.Series(train_losses).rolling(window=3, center=True, min_periods=1).mean()
     val_smooth    = pd.Series(val_losses).rolling(window=3, center=True, min_periods=1).mean()
@@ -159,7 +188,7 @@ def save_run_results(runpath, cfg, epochs, train_losses, val_losses,
     plt.savefig(os.path.join(runpath, 'training_curves.png'))
     plt.close()
 
-# ─────────── 3) Training + saving pipeline ───────────
+# ─────────── 4) Training + saving pipeline ───────────
 def train_and_save(runpath, model, train_loader, val_loader, test_loader,
                    slot2id, intent2id, cfg):
     device = DEVICE
@@ -243,7 +272,7 @@ def train_and_save(runpath, model, train_loader, val_loader, test_loader,
 
     return slot_test, intent_test
 
-# ─────────── 4) run_experiments ───────────
+# ─────────── 5) run_experiments ───────────
 def run_experiments(to_run):
     tmp_train = load_data(os.path.join('dataset', 'ATIS', 'train.json'))
     test_raw  = load_data(os.path.join('dataset', 'ATIS', 'test.json'))
@@ -263,6 +292,8 @@ def run_experiments(to_run):
     val_ds   = NLUDataset(val_raw,   tokenizer, slot2id, intent2id)
     test_ds  = NLUDataset(test_raw,  tokenizer, slot2id, intent2id)
 
+    base_seed = 42  # starting seed for reproducibility
+
     for exp, cfg in to_run.items():
         timestamp  = datetime.now().strftime("%Y%m%d_%H%M%S")
         runpath    = os.path.join("runs",    exp, timestamp)
@@ -270,30 +301,57 @@ def run_experiments(to_run):
         cfg.update({
             'runpath':    runpath,
             'model_path': model_path,
-            'model_name': 'bert-base-uncased'
+            'model_name': 'bert-large-uncased' # or 'bert-large-uncased'
         })
         os.makedirs(runpath, exist_ok=True)
 
-        print(f"\n===== Running {exp} =====")
-        train_loader = DataLoader(train_ds,
-                                  batch_size=cfg['batch_size'],
-                                  shuffle=True)
-        val_loader   = DataLoader(val_ds,
-                                  batch_size=cfg['batch_size'])
-        test_loader  = DataLoader(test_ds,
-                                  batch_size=cfg['batch_size'])
+        # By default, if you haven't set 'n_runs' in cfg, use 1
+        n_runs = cfg.get('n_runs', 1)
 
-        slot_test, intent_test = train_and_save(
-            runpath,
-            JointBertForNLU(
+        # Container to collect test metrics across all runs
+        test_slot_f1s = []
+        test_intent_accs = []
+
+        print(f"\n===== Running {exp} ({n_runs} runs) =====")
+        for run_idx in range(n_runs):
+            current_seed = base_seed + run_idx
+            set_global_seed(current_seed)
+            print(f"  Run {run_idx+1}/{n_runs} with seed {current_seed}")
+
+            # Instantiate and train/evaluate the model
+            train_loader = DataLoader(train_ds,
+                                      batch_size=cfg['batch_size'],
+                                      shuffle=True)
+            val_loader   = DataLoader(val_ds,
+                                      batch_size=cfg['batch_size'])
+            test_loader  = DataLoader(test_ds,
+                                      batch_size=cfg['batch_size'])
+
+            # Build an instance of JointBertForNLU
+            model = JointBertForNLU(
                 cfg['model_name'],
                 len(intents),
                 len(slots),
                 cfg['dropout']
-            ),
-            train_loader, val_loader, test_loader,
-            slot2id, intent2id,
-            cfg
-        )
-        print(f"→ Test Slot F1: {slot_test['total']['f']:.4f}")
-        print(f"→ Test Intent Acc: {intent_test['accuracy']:.4f}")
+            )
+
+            slot_test, intent_test = train_and_save(
+                runpath,
+                model,
+                train_loader, val_loader, test_loader,
+                slot2id, intent2id,
+                cfg
+            )
+            print(f"    → Test Slot F1: {slot_test['total']['f']:.4f}")
+            print(f"    → Test Intent Acc: {intent_test['accuracy']:.4f}")
+
+            test_slot_f1s.append(slot_test['total']['f'])
+            test_intent_accs.append(intent_test['accuracy'])
+
+        # If n_runs > 1, print mean ± std
+        if n_runs > 1:
+            arr_slot = np.asarray(test_slot_f1s)
+            arr_int  = np.asarray(test_intent_accs)
+            print(f"\n  [{exp} Summary] Slot F1: {arr_slot.mean():.4f} ± {arr_slot.std():.4f}")
+            print(f"  [{exp} Summary] Intent Acc: {arr_int.mean():.4f} ± {arr_int.std():.4f}")
+

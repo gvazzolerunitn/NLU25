@@ -6,10 +6,18 @@
 from functions import *
 
 if __name__ == "__main__":
-    # define experiments; 'batch_size' added for flexibility
+    # define experiments
     to_run = {
-        #'BertJoint':          {'run': True,  'batch_size': 32, 'lr':5e-5, 'epochs':30, 'patience':5, 'clip':5, 'dropout':0.1},
-        #'BertJoint_dropout':  {'run': True,  'batch_size': 32, 'lr':5e-5, 'epochs':30, 'patience':5, 'clip':5, 'dropout':0.5},
-        'BertJoint_best':  {'run': True,  'batch_size': 32, 'lr':5e-5, 'epochs':10, 'patience':3, 'clip':5, 'dropout':0.1}
+        "BertLarge_Improved": {
+            "run": True,
+            "batch_size": 8,        # Smaller batch size for better generalization
+            "lr": 1e-5,             # Lower learning rate (half of current)
+            "epochs": 10,           # More epochs
+            "patience": 4,          # More patience for early stopping
+            "clip": 1,              # Lower gradient clipping
+            "dropout": 0.3,         # Higher dropout for regularization
+            "model": "bert-large-uncased",
+            "n_runs": 3
+        }
     }
     run_experiments(to_run)

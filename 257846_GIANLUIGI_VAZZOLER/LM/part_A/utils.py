@@ -32,9 +32,7 @@ def get_vocab(corpus, special_tokens=[]):
                 i += 1
     return output
 
-# !wget -P dataset/PennTreeBank https://raw.githubusercontent.com/BrownFortress/NLU-2024-Labs/main/labs/dataset/PennTreeBank/ptb.test.txt
-# !wget -P dataset/PennTreeBank https://raw.githubusercontent.com/BrownFortress/NLU-2024-Labs/main/labs/dataset/PennTreeBank/ptb.valid.txt
-# !wget -P dataset/PennTreeBank https://raw.githubusercontent.com/BrownFortress/NLU-2024-Labs/main/labs/dataset/PennTreeBank/ptb.train.txt
+# Read the corpus
 train_raw = read_file("dataset/PennTreeBank/ptb.train.txt")
 dev_raw = read_file("dataset/PennTreeBank/ptb.valid.txt")
 test_raw = read_file("dataset/PennTreeBank/ptb.test.txt")
@@ -42,7 +40,6 @@ test_raw = read_file("dataset/PennTreeBank/ptb.test.txt")
 # Vocab is computed only on training set 
 # We add two special tokens end of sentence and padding 
 vocab = get_vocab(train_raw, ["<pad>", "<eos>"])
-#print(len(vocab))
 
 # This class computes and stores our vocab 
 # Word to ids and ids to word
@@ -90,7 +87,6 @@ class PennTreeBank (data.Dataset):
         return sample
     
     # Auxiliary methods
-    
     def mapping_seq(self, data, lang): # Map sequences of tokens to corresponding computed in Lang class
         res = []
         for seq in data:
@@ -109,7 +105,7 @@ train_dataset = PennTreeBank(train_raw, lang)
 dev_dataset = PennTreeBank(dev_raw, lang)
 test_dataset = PennTreeBank(test_raw, lang)
 
-
+# Collate function to pad sequences in a batch
 def collate_fn(data, pad_token):
     def merge(sequences):
         '''

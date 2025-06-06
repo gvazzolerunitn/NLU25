@@ -1,14 +1,36 @@
+# Models
 **/model_bin/
+**/model_bin_OLD/
+# Datasets
 **/dataset/
+
+# Results, logs, and plotting
+**/runs/
+**/runs_OLD/
+**/best_runs/
+
 **/new_plots/
-**/__pycache__/
 plotting.py
+run_all.sh
+
+# Part 1.A
+**/RNN_runs
+**/LSTM_drop_adam_runs
+**/LSTM_drop_runs
+**/LSTM_runs
+
+# Part 1.B
+**/WT
+**/WT_VD
+**/WT_VD_NTAvSGD
 
 # File temporanei o di backup
 *.pyc
 *.pyo
 *.zip
 *.tar.gz
+*.json
+**/__pycache__/
 
 
 # File nascosti

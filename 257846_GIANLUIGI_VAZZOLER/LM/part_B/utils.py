@@ -25,9 +25,7 @@ def get_vocab(corpus, special_tokens=[]):
                 i += 1
     return output
 
-# !wget -P dataset/PennTreeBank https://raw.githubusercontent.com/BrownFortress/NLU-2024-Labs/main/labs/dataset/PennTreeBank/ptb.test.txt
-# !wget -P dataset/PennTreeBank https://raw.githubusercontent.com/BrownFortress/NLU-2024-Labs/main/labs/dataset/PennTreeBank/ptb.valid.txt
-# !wget -P dataset/PennTreeBank https://raw.githubusercontent.com/BrownFortress/NLU-2024-Labs/main/labs/dataset/PennTreeBank/ptb.train.txt
+# Read the Penn Tree Bank dataset
 train_raw = read_file("dataset/PennTreeBank/ptb.train.txt")
 dev_raw = read_file("dataset/PennTreeBank/ptb.valid.txt")
 test_raw = read_file("dataset/PennTreeBank/ptb.test.txt")
@@ -70,7 +68,7 @@ class PennTreeBank (data.Dataset):
         for sentence in corpus:
             self.source.append(sentence.split()[0:-1]) # We get from the first token till the second-last token
             self.target.append(sentence.split()[1:]) # We get from the second token till the last token
-            # See example in section 6.2
+        # We map the sequences of tokens to their corresponding ids
         
         self.source_ids = self.mapping_seq(self.source, lang)
         self.target_ids = self.mapping_seq(self.target, lang)
@@ -85,7 +83,6 @@ class PennTreeBank (data.Dataset):
         return sample
     
     # Auxiliary methods
-    
     def mapping_seq(self, data, lang): # Map sequences of tokens to corresponding computed in Lang class
         res = []
         for seq in data:
@@ -107,6 +104,7 @@ test_dataset = PennTreeBank(test_raw, lang)
 from functools import partial
 from torch.utils.data import DataLoader
 
+# Collate function to pad sequences in a batch
 def collate_fn(data, pad_token):
     def merge(sequences):
         '''
@@ -139,7 +137,7 @@ def collate_fn(data, pad_token):
     new_item["number_tokens"] = sum(lengths)
     return new_item
 
-
+# Function to get the data loaders for training, validation, and testing
 def get_loaders(batch_size_train,
                 batch_size_eval=None,
                 pad_token=None,

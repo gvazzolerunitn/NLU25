@@ -3,6 +3,7 @@
 import os
 import copy
 import torch
+import random
 import numpy as np
 import pandas as pd
 import torch.nn as nn
@@ -107,7 +108,8 @@ def eval_loop(data, criterion_slots, criterion_intents, model, lang):
     return results, report_intent, loss_array
 
 
-# CORRECTED: Fixed train function to ensure sampled_epochs is returned
+    # Main training function for one experiment run.
+    # Handles model training, validation, early stopping, checkpointing, and final test evaluation.
 def train(file_path, lang, model, PAD_TOKEN, train_loader, val_loader, test_loader, lr, clip, epochs=200, patience=3):
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion_slots = nn.CrossEntropyLoss(ignore_index=PAD_TOKEN)
@@ -121,7 +123,7 @@ def train(file_path, lang, model, PAD_TOKEN, train_loader, val_loader, test_load
     intent_accs = []
     slot_f1s = []
     
-    pbar = tqdm(range(1, epochs))
+    pbar = tqdm(range(1, epochs+1))
     for epoch in pbar:
         loss = train_loop(train_loader, optimizer, criterion_slots, criterion_intents, model, clip=clip)
         if epoch % 5 == 0:
@@ -250,16 +252,50 @@ def save_aggregated_summary(runpath, experiment_name, slot_f1s, intent_accs):
         f.write(f"Mean Intent Accuracy: {np.mean(intent_accs):.4f} ± {np.std(intent_accs):.4f}\n")
 
 
-# CORRECTED: Modified run_training_pipeline to handle the modified train function return value
+def set_global_seed(seed: int):
+    """
+    Sets the seed for all involved libraries:
+      - Python's random
+      - NumPy
+      - PyTorch (CPU and GPU)
+      - cuDNN (deterministic)
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+# Modified run_training_pipeline to handle the modified train function return value
 def run_training_pipeline(experiments_config):
+    """
+    Orchestrates training and evaluation for multiple experiment configurations.
+    For each experiment:
+      - Builds or loads 'Lang' (vocabulary mappings)
+      - Creates DataLoaders for train/val/test
+      - Runs 'n_runs' replicates (if cfg['run'] is True), otherwise just evaluates a saved model
+      - Saves per-run logs, best checkpoints, and aggregated summaries
+    """
+
+    base_seed = 42  # Set a global seed for reproducibility
+
     save_path = "./"
+    
+    # Load raw ATIS data
     tmp_train_raw = load_data(os.path.join('dataset', 'ATIS', 'train.json'))
     test_raw = load_data(os.path.join('dataset', 'ATIS', 'test.json'))
+    
+    # Split out a validation set from training
     train_raw, val_raw, y_train, y_val, y_test = create_dev_set(tmp_train_raw, test_raw)
+    
+    # Build combined vocabulary over train/val/test for slots and intents; words only from train
     words = sum([x['utterance'].split() for x in train_raw], [])
     corpus = train_raw + val_raw + test_raw
     slots = set(sum([line['slots'].split() for line in corpus], []))
     intents = set([line['intent'] for line in corpus])
+    
+    # Default hyperparameters; will be overridden by experiments_config
     default_options = {
         'hid_size': 200,
         'emb_size': 300,
@@ -268,67 +304,127 @@ def run_training_pipeline(experiments_config):
         'dropout': 0,
         'bidirectional': False,
         'n_runs': 1,
-        'run': False,
+        'run': False,  # When False, we load existing saved model
     }
     
+    # Iterate through each experiment defined by the user
     for experiment in experiments_config:
+        # Merge default options with experiment-specific overrides
         cfg = default_options | experiments_config[experiment]
         print(f"Running experiment {experiment}")
         
+        # Build or load vocabulary mappings
         if cfg['run']:
+            # Create a new Lang object (word/slot/intent mappings) from scratch
             lang = Lang(words, intents, slots, cutoff=0)
         else:
-            saved_model = torch.load('./model_bin/' + experiment + '.pt', map_location=torch.device(device))
+            # Load a previously saved model to retrieve its 'lang' object
+            saved_model = torch.load(f'./model_bin/{experiment}.pt', map_location=torch.device(device))
             lang = saved_model['lang']
         
+        # Determine output dimensions from vocabulary sizes
         out_slot = len(lang.slot2id)
         out_int = len(lang.intent2id)
         vocab_len = len(lang.word2id)
         
+        # Prepare datasets and DataLoaders
         train_dataset = IntentsAndSlots(train_raw, lang)
         val_dataset = IntentsAndSlots(val_raw, lang)
         test_dataset = IntentsAndSlots(test_raw, lang)
         
-        train_loader = DataLoader(train_dataset, batch_size=128, collate_fn=collate_fn, shuffle=True)
-        val_loader = DataLoader(val_dataset, batch_size=64, collate_fn=collate_fn)
-        test_loader = DataLoader(test_dataset, batch_size=64, collate_fn=collate_fn)
+        train_loader = DataLoader(
+            train_dataset, 
+            batch_size=128, 
+            collate_fn=collate_fn, 
+            shuffle=True
+        )
+        val_loader = DataLoader(
+            val_dataset, 
+            batch_size=64, 
+            collate_fn=collate_fn, 
+            shuffle=False
+        )
+        test_loader = DataLoader(
+            test_dataset, 
+            batch_size=64, 
+            collate_fn=collate_fn, 
+            shuffle=False
+        )
         
+        # Create directories for saving runs and models if they don't exist
         runpath = os.path.join(save_path, 'runs', experiment)
         os.makedirs(runpath, exist_ok=True)
         os.makedirs('./model_bin', exist_ok=True)
-        file_path = './model_bin/' + experiment + '.pt'
+        file_path = f'./model_bin/{experiment}.pt'
         
-        slot_f1s, intent_acc = [], []
-        results_test, intent_test = [], []
-        best_f1_overall = -1  # tracks best overall F1 for best model
+        # Prepare containers for collecting test metrics across runs
+        test_slot_f1s = []
+        test_intent_accs = []
+        best_f1_overall = -1  # To keep track of the best test F1 across all runs
         
+        # If we are not training (cfg['run'] == False), force multiple evaluations for stability
         if not cfg['run']:
-            cfg['n_runs'] = 5
+            cfg['n_runs'] = 5  # e.g., evaluate 5 times to average out any randomness
         
+        # Loop over the number of runs for this experiment
         for run_idx in range(cfg['n_runs']):
-            model = ModelIAS(cfg['emb_size'], out_slot, out_int, cfg['hid_size'], vocab_len, 
-                             pad_index=PAD_TOKEN, bidirectional=cfg['bidirectional'], dropout=cfg['dropout']).to(device)
+            current_seed = base_seed + run_idx
+            set_global_seed(current_seed) 
+            # Instantiate a fresh model for each run
+            model = ModelIAS(
+                cfg['hid_size'], 
+                out_slot, 
+                out_int, 
+                cfg['emb_size'], 
+                vocab_len, 
+                pad_index=PAD_TOKEN, 
+                bidirectional=cfg['bidirectional'], 
+                dropout=cfg['dropout']
+            ).to(device)
             
             if cfg['run']:
+                # Initialize model weights before training
                 model.apply(init_weights)
-                # CORRECTED: Updated to accept the new return value from train() including sampled_epochs
-                results_test, intent_test, losses_train, losses_val, intent_accs, slot_f1s, sampled_epochs = train(
-                    file_path, lang, model, PAD_TOKEN, train_loader, val_loader, test_loader, cfg['lr'], cfg['clip']
+                
+                # Train and validate, returning validation metrics per epoch
+                (results_test, intent_test, 
+                 losses_train, losses_val, 
+                 intent_val_accs, slot_val_f1s, 
+                 sampled_epochs) = train(
+                    file_path, 
+                    lang, 
+                    model, 
+                    PAD_TOKEN, 
+                    train_loader, 
+                    val_loader, 
+                    test_loader, 
+                    cfg['lr'], 
+                    cfg['clip']
                 )
                 
-                # Create a subdirectory for each run
+                # Save per-run logs and plots
                 run_dir = os.path.join(runpath, f"run_{run_idx + 1}")
                 os.makedirs(run_dir, exist_ok=True)
-                save_run_results(run_dir, cfg, sampled_epochs, losses_train, losses_val, intent_accs, slot_f1s, results_test, intent_test)
-
-                # Save model of this run with unique name
+                save_run_results(
+                    run_dir, 
+                    cfg, 
+                    sampled_epochs, 
+                    losses_train, 
+                    losses_val, 
+                    intent_val_accs, 
+                    slot_val_f1s, 
+                    results_test, 
+                    intent_test
+                )
+                
+                # Save this run's model checkpoint
                 run_model_path = f'./model_bin/{experiment}_run{run_idx + 1}.pt'
                 torch.save({
                     "model": model.state_dict(),
                     "lang": lang,
                 }, run_model_path)
-
-                # Save best model among all runs
+                
+                # Update best overall test F1 if this run is superior
                 if results_test['total']['f'] > best_f1_overall:
                     best_f1_overall = results_test['total']['f']
                     best_model_path = f'./model_bin/{experiment}_best.pt'
@@ -336,22 +432,32 @@ def run_training_pipeline(experiments_config):
                         "model": model.state_dict(),
                         "lang": lang,
                     }, best_model_path)
-
+            
             else:
+                # If not training, simply load the saved model and evaluate on test set
                 model.load_state_dict(saved_model['model'])
                 criterion_slots = nn.CrossEntropyLoss(ignore_index=PAD_TOKEN)
                 criterion_intents = nn.CrossEntropyLoss()
-                results_test, intent_test, _ = eval_loop(test_loader, criterion_slots, criterion_intents, model, lang)
+                results_test, intent_test, _ = eval_loop(
+                    test_loader, 
+                    criterion_slots, 
+                    criterion_intents, 
+                    model, 
+                    lang
+                )
             
-            intent_acc.append(intent_test['accuracy'])
-            slot_f1s.append(results_test['total']['f'])
+            # Collect test metrics for aggregation
+            test_slot_f1s.append(results_test['total']['f'])
+            test_intent_accs.append(intent_test['accuracy'])
         
+        # After all runs, compute and print mean ± std if multiple runs were performed
         if cfg['n_runs'] > 1:
-            slot_f1s = np.asarray(slot_f1s)
-            intent_acc = np.asarray(intent_acc)
-            print(f'Slot F1: {slot_f1s.mean():.3f} +- {slot_f1s.std():.3f}')
-            print(f'Intent Acc: {intent_acc.mean():.3f} +- {intent_acc.std():.3f}')
-            save_aggregated_summary(runpath, experiment, slot_f1s, intent_acc)
+            arr_slot = np.asarray(test_slot_f1s)
+            arr_int  = np.asarray(test_intent_accs)
+            print(f"Slot F1: {arr_slot.mean():.3f} ± {arr_slot.std():.3f}")
+            print(f"Intent Acc: {arr_int.mean():.3f} ± {arr_int.std():.3f}")
+            save_aggregated_summary(runpath, experiment, arr_slot, arr_int)
         else:
-            print(f"Slot F1: {results_test['total']['f']:.3f}")
-            print(f"Intent Accuracy: {intent_test['accuracy']:.3f}")
+            # Single-run case: just print the final metrics
+            print(f"Slot F1: {test_slot_f1s[0]:.3f}")
+            print(f"Intent Accuracy: {test_intent_accs[0]:.3f}")

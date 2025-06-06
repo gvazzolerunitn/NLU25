@@ -1,3 +1,0 @@
-Experiment: LSTM_dropout0.3_bidir
-Mean Slot F1: 0.8986 ± 0.1552
-Mean Intent Accuracy: 0.9504 ± 0.0023

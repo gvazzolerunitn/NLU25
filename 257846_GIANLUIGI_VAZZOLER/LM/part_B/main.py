@@ -39,46 +39,21 @@ def get_config():
     return vars(p.parse_args())
 
 # ───────────────────────────────────────────────────────────────────────
-# Experiment configurations
+# Experiment configuration
 # ───────────────────────────────────────────────────────────────────────
-""" EXPERIMENTS = [
-    # STEP 1: Weight Tying only
-    {"name": "LSTM_WT_only", "use_vdropout": False, "use_ntasgd": False, "lr": 1.0, "emb_size": 300, "hid_size": 300, "batch_size": 32, "dropout_rate": 0.0},
-
-    # STEP 2: Weight Tying + Variational Dropout
-    {"name": "LSTM_WT_VD", "use_vdropout": True, "use_ntasgd": False, "lr": 1.0, "emb_size": 300, "hid_size": 300, "batch_size": 32, "dropout_rate": 0.2},
-
-    # STEP 3: Weight Tying + Variational Dropout + NT-AvSGD (standard config)
-    {"name": "LSTM_WT_VD_NTAvSGD", "use_vdropout": True, "use_ntasgd": True, "lr": 1.0, "emb_size": 300, "hid_size": 300, "batch_size": 32, "dropout_rate": 0.2},
-
-    # Exploring lr variations
-    {"name": "LSTM_WT_VD_NTAvSGD", "use_vdropout": True, "use_ntasgd": True, "lr": 1.5, "emb_size": 300, "hid_size": 300, "batch_size": 32, "dropout_rate": 0.2},
-    {"name": "LSTM_WT_VD_NTAvSGD", "use_vdropout": True, "use_ntasgd": True, "lr": 2.0, "emb_size": 300, "hid_size": 300, "batch_size": 32, "dropout_rate": 0.2},
-
-    # Exploring bigger model
-    {"name": "LSTM_WT_VD_NTAvSGD", "use_vdropout": True, "use_ntasgd": True, "lr": 1.0, "emb_size": 400, "hid_size": 400, "batch_size": 64, "dropout_rate": 0.2},
-    {"name": "LSTM_WT_VD_NTAvSGD", "use_vdropout": True, "use_ntasgd": True, "lr": 1.5, "emb_size": 400, "hid_size": 400, "batch_size": 64, "dropout_rate": 0.2},
-    {"name": "LSTM_WT_VD_NTAvSGD", "use_vdropout": True, "use_ntasgd": True, "lr": 2.0, "emb_size": 400, "hid_size": 400, "batch_size": 64, "dropout_rate": 0.3},
-
-    # Exploring smaller model
-    {"name": "LSTM_WT_VD_NTAvSGD", "use_vdropout": True, "use_ntasgd": True, "lr": 1.0, "emb_size": 200, "hid_size": 200, "batch_size": 32, "dropout_rate": 0.1},
-    {"name": "LSTM_WT_VD_NTAvSGD", "use_vdropout": True, "use_ntasgd": True, "lr": 1.5, "emb_size": 200, "hid_size": 200, "batch_size": 32, "dropout_rate": 0.1},
-] """
 
 EXPERIMENTS = [
     {
-  "name":            "LSTM_AWD_like",
-  "use_vdropout":    True,
-  "use_ntasgd":      True,
-  "lr":              1.5,       # via di mezzo tra 1.0 e 2.0
-  "emb_size":        400,       # “medium” / “large” come nel paper
-  "hid_size":        400,
-  "batch_size":      40,        # più vicino al 32–45 consigliato
-  "dropout_rate":    0.3        # valore un po’ più basso per non soffocare l’output
+  "name":            "LSTM_WT_VD_NTAvSGD4",  
+  "use_vdropout":    True,      # here we can toggle variational dropout 
+  "use_ntasgd":      True,      # and here we can toggle NT-AvSGD
+  "lr":              4.0,       
+  "emb_size":        450,       
+  "hid_size":        450,
+  "batch_size":      64,        
+  "dropout_rate":    0.4        # variational dropout rate
 }
 ]
-
-
 
 # Common parameters
 common_params = {
@@ -116,7 +91,7 @@ def run_evaluation(config):
         if make_run_name(exp) == run_name:
             matched = exp
             break
-
+    # handles the case where no match is found
     if matched is None:
         print(f"ERROR: no experiment in EXPERIMENTS generated run_name '{run_name}'", file=sys.stderr)
         sys.exit(1)
@@ -184,23 +159,21 @@ def run_training():
 
         losses_train, losses_dev, ppl_devs, sampled_epochs = [], [], [], []
 
-        # — Inizializza best_model e buffer per NT-AvSGD
+        # — Initialize best_model and buffer for NT-AvSGD
         best_ppl      = math.inf
-        best_model    = copy.deepcopy(model)            # sempre disponibile
-        ppl_logs      = []                              # terrà i dev-PPL di ogni epoca
+        best_model    = copy.deepcopy(model)            # always available
+        ppl_logs      = []                              # will store the dev-PPL of each epoch
         patience      = common_params['patience']
 
         averaging     = False
         average_model = None
         trigger_epoch = None
 
-        for epoch in range(1, common_params['n_epochs'] + 1):
-            # — Wrap epochs in a tqdm progress bar —
-            pbar = tqdm(
-                range(1, common_params['n_epochs'] + 1),
-                desc=f"Exp {exp['name']}",
-                unit="ep"
-            )
+        pbar = tqdm(
+        range(1, common_params['n_epochs'] + 1),
+        desc=f"Exp {exp['name']}",
+        unit="ep"
+        )
         for epoch in pbar:
             # 1) train
             loss = train_loop(train_loader, optimizer, criterion_train, model, common_params['clip'])
@@ -222,7 +195,7 @@ def run_training():
                 "DevPPL":    f"{ppl_dev:.2f}"
             })
 
-            # Registra il dev-PPL per il trigger non-monotono
+            # Record the dev-PPL for the non-monotonic trigger
             ppl_logs.append(ppl_dev)
 
             if not exp['use_ntasgd']:
@@ -238,7 +211,7 @@ def run_training():
             else:
                 # — NT-AvSGD logic
                 if not averaging:
-                    # trigger: il PPL corrente supera il min dei PPL delle epoche precedenti (escluse ultime ntasgd_trigger)
+                    # trigger: current PPL exceeds the minimum PPL of previous epochs (excluding the last ntasgd_trigger epochs)
                     if len(ppl_logs) > common_params['ntasgd_trigger'] and \
                        ppl_dev > min(ppl_logs[:-common_params['ntasgd_trigger']]):
                         print(f"Starting NT-AvSGD Averaging from epoch {epoch}")
@@ -252,13 +225,13 @@ def run_training():
                         p_avg.data.mul_(steps / (steps + 1))
                         p_avg.data.add_(p_model.data / (steps + 1))
 
-                # aggiorna sempre il best_model sulla base del dev-PPL
+                # always update the best_model based on the dev-PPL
                 if ppl_dev < best_ppl:
                     best_ppl   = ppl_dev
                     best_model = copy.deepcopy(model)
 
         # Final evaluation
-        # — Scegli il modello finale (averaged vs best)
+        # — Choose the final model (averaged vs best)
         if exp['use_ntasgd'] and averaging:
             final_model = average_model.to(device)
         else:
@@ -272,7 +245,7 @@ def run_training():
         run_dir   = os.path.join("runs",      exp_name)
         model_dir = os.path.join("model_bin", exp_name)
 
-        save_models(final_model, model_dir)  # note: model.pt & model_best.pt
+        save_models(final_model, model_dir)  # save the final model state
         plot_training_curves(sampled_epochs, losses_train, losses_dev, ppl_devs, best_ppl, run_dir)
         save_training_log(sampled_epochs, losses_train, losses_dev, run_dir, best_ppl, exp, ppl_devs, final_ppl)
 

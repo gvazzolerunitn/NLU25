@@ -1,17 +1,15 @@
 import os
-import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import math
 import matplotlib.pyplot as plt
 import csv
 
-from tqdm import tqdm
-
 from model import *
 from utils import *
 
+# TRAINING and EVALUATION LOOP
+# Training loop to update the weights of the model
 def train_loop(data, optimizer, criterion, model, clip=5):
     model.train()
     loss_array = []
@@ -30,6 +28,7 @@ def train_loop(data, optimizer, criterion, model, clip=5):
         
     return sum(loss_array)/sum(number_of_tokens)
 
+# Evaluation loop to compute the perplexity and loss of the model
 def eval_loop(data, eval_criterion, model):
     model.eval()
     loss_to_return = []
@@ -47,6 +46,7 @@ def eval_loop(data, eval_criterion, model):
     loss_to_return = sum(loss_array) / sum(number_of_tokens)
     return ppl, loss_to_return
 
+# Function to initialize weights of the model (this is to ensure that the model starts with good weights)
 def init_weights(mat):
     for m in mat.modules():
         if type(m) in [nn.GRU, nn.LSTM, nn.RNN]:
@@ -67,36 +67,8 @@ def init_weights(mat):
                 if m.bias != None:
                     m.bias.data.fill_(0.01)
 
-""" # Experiment also with a smaller or bigger model by changing hid and emb sizes 
-# A large model tends to overfit
-hid_size = 300 # OLD: 200 (they must be the same value for weight tying)
-emb_size = 300
-
-# Don't forget to experiment with a lower training batch size
-# Increasing the back propagation steps can be seen as a regularization step
-
-# With SGD try with an higher learning rate (> 1 for instance)
-lr = 1 # This is definitely not good for SGD [try 1 for SGD and 0.001 for AdamW]
-clip = 5 # Clip the gradient
-
-vocab_len = len(lang.word2id)
-
-model = LM_LSTM(emb_size, hid_size, vocab_len, pad_index=lang.word2id["<pad>"]).to(DEVICE)
-model.apply(init_weights)
-
-# OLD CODE => SGD
-optimizer = optim.SGD(model.parameters(), lr=lr)
-
-criterion_train = nn.CrossEntropyLoss(ignore_index=lang.word2id["<pad>"])
-criterion_eval = nn.CrossEntropyLoss(ignore_index=lang.word2id["<pad>"], reduction='sum')
-
-# Dataloader instantiation
-# You can reduce the batch_size if the GPU memory is not enough
-train_loader = DataLoader(train_dataset, batch_size=32, collate_fn=partial(collate_fn, pad_token=lang.word2id["<pad>"]),  shuffle=True)
-dev_loader = DataLoader(dev_dataset, batch_size=128, collate_fn=partial(collate_fn, pad_token=lang.word2id["<pad>"]))
-test_loader = DataLoader(test_dataset, batch_size=128, collate_fn=partial(collate_fn, pad_token=lang.word2id["<pad>"])) """
-
-# Utility functions
+# UTILITY FUNCTIONS
+# Function to plot training curves
 def plot_training_curves(sampled_epochs, losses_train, losses_dev, ppl_devs, best_ppl, run_dir):
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
@@ -126,6 +98,7 @@ def plot_training_curves(sampled_epochs, losses_train, losses_dev, ppl_devs, bes
     plt.savefig(os.path.join(run_dir, 'training_curves.png'), dpi=300, bbox_inches='tight')
     plt.close()
 
+# Function to save the training log in a CSV file
 def save_training_log(sampled_epochs, losses_train, losses_dev, run_dir, best_ppl, config, ppl_devs, final_ppl):
     csv_path = os.path.join(run_dir, 'training_log.csv')
     with open(csv_path, mode='w', newline='') as file:
@@ -144,6 +117,7 @@ def save_training_log(sampled_epochs, losses_train, losses_dev, run_dir, best_pp
         writer.writerow(['Best Validation PPL', f"{best_ppl:.3f}"])
         writer.writerow(['Test PPL', f"{final_ppl:.3f}"])
 
+# Function to save the model state
 def save_models(model, model_dir):
     os.makedirs(model_dir, exist_ok=True)
     torch.save(model.state_dict(), os.path.join(model_dir, 'model.pt'))
